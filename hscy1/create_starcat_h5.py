@@ -2,56 +2,156 @@
 This code takes the public star catalogs and converts
 them into h5 format that can be ingested in TXPipe.
 '''
+import os,sys
 import h5py 
 import numpy as np
 from astropy.io import fits
 
+def get_T_e1e2(d,colprefix,idx):
+    ixx = d[1].data[colprefix+'_ixx'][idx]
+    iyy = d[1].data[colprefix+'_iyy'][idx]
+    ixy = d[1].data[colprefix+'_ixy'][idx]
+    T   = ixx + iyy
+    e1  = 0.5*(ixx-iyy)/T
+    e2  = 0.5*2*ixy/T
+    # The factor of 0.5 comes from eq 3 of 
+    # https://arxiv.org/abs/1705.06745 which is 
+    # a conversion factor from e1,e2 -> g1,g2
+    # see also eq.4.11 of https://arxiv.org/abs/astro-ph/9912508
+    return T,e1,e2
+
 fieldi    = int(sys.argv[1])
 
-fieldlist = ['GAMA09H','GAMA15H',' HECTOMAP', 'VVDS', 'WIDE12H', 'XMM']
-field     = fieldlist[fieldi] 
 
-d = fits.open('/global/cfs/cdirs/lsst/groups/WL/users/yomori/scratch/HSC/hsc_stars/%s_stars.fits'%field)
+if fieldi==0:
+    fieldlist = ['GAMA09H','GAMA15H','HECTOMAP', 'VVDS', 'WIDE12H', 'XMM']
 
-# If 'icalib_psf_used'==True, the star was used to model the psf 
-# If 'icalib_psf_used'==False the star is used as a test ("reserved star")
-# according to HSC paper the 20% of the stars are reserved
-idx_v = np.where(d[1].data['icalib_psf_used']==True)[0]
-idx_r = np.where(d[1].data['icalib_psf_used']==False)[0]
+    ra  = np.array([])
+    dec = np.array([])
+    T_meas   = np.array([])
+    T_model  = np.array([])
+    e1_meas  = np.array([])
+    e2_meas  = np.array([])
+    e1_model = np.array([])
+    e2_model = np.array([])
+    idxr     = np.array([])
+    idxu     = np.array([])
 
-print("Total number of stars: %d"%(len(idx_v)+len(idx_t) ) )
-print("Number of stars used : %d"%(len(idx_v)))
-print("Number of stars reserved : %d"%(len(idx_r)))
+    for field in fieldlist:
+        d = fits.open('/global/cfs/cdirs/lsst/groups/WL/users/yomori/scratch/HSC/hsc_stars/%s_stars.fits'%field)
 
-print("Computing T,e1,e2 from ixx,iyy,ixy")
-ixx_meas  = d[1].data['ishape_sdss_ixx'][idx_r]
-iyy_meas  = d[1].data['ishape_sdss_iyy'][idx_r] 
-ixy_meas  = d[1].data['ishape_sdss_ixy'][idx_r]
-T_meas    = ixx_meas + iyy_meas
-e1_meas   = (ixx_meas-iyy_meas)/T_meas
-e2_meas   = 2*ixy_meas/T_meas
+        # If 'icalib_psf_used'==True, the star was used to model the psf
+        # If 'icalib_psf_used'==False the star is used as a test ("reserved star")
+        # according to HSC paper the 20% of the stars are reserved
+        idx_u = np.where(d[1].data['icalib_psf_used']==True)[0]
+        idx_r = np.where(d[1].data['icalib_psf_used']==False)[0]
 
-ixx_model = d[1].data['ishape_sdss_psf_ixx'][idx_r]
-iyy_model = d[1].data['ishape_sdss_psf_iyy'][idx_r] 
-ixy_model = d[1].data['ishape_sdss_psf_ixy'][idx_r]
-T_model   = ixx_model + iyy_model
-e1_model  = (ixx_model-iyy_model)/T_model
-e2_model  = 2*ixy_model/T_model
+        print("Processing: %s"%field)
+        print("Total number of stars: %d"%(len(idx_u)+len(idx_r) ) )
+        print("Number of stars used : %d"%(len(idx_u)))
+        print("Number of stars reserved : %d"%(len(idx_r)))
 
-f=h5py.File('./star_catalog_hscy1_%s.h5'%field, 'w')
-f.create_group("stars")
-f['stars/ra']          = d[1].data['ira'][idx_r]
-f['stars/dec']         = d[1].data['idec'][idx_r]
-f['stars/measured_T']  = d[1].data['T_meas'][idx_r]
-f['stars/measured_e1'] = d[1].data['e1_meas'][idx_r]
-f['stars/measured_e2'] = d[1].data['e2_meas'][idx_r]
-f['stars/model_T']     = d[1].data['T_model'][idx_r]
-f['stars/model_e1']    = d[1].data['e1_model'][idx_r]
-f['stars/model_e2']    = d[1].data['e2_model'][idx_r]
-f['stars/calib_psf_reserved'] = np.ones(idx_r)#d[1].data['ira'][idx_r]
-f,close()
+        print("Computing T,e1,e2 from ixx,iyy,ixy")
+        rT_model, re1_model, re2_model = get_T_e1e2(d,'ishape_sdss_psf',idx_r)
+        rT_meas, re1_meas, re2_meas    = get_T_e1e2(d,'ishape_sdss',idx_r);
+        #re1_meas = re1_meas-np.mean(re1_meas)
+        #re2_meas = re2_meas-np.mean(re2_meas)
+
+        uT_model, ue1_model, ue2_model = get_T_e1e2(d,'ishape_sdss_psf',idx_u)
+        uT_meas, ue1_meas, ue2_meas    = get_T_e1e2(d,'ishape_sdss',idx_u);
+        #ue1_meas = ue1_meas-np.mean(ue1_meas)
+        #ue2_meas = ue2_meas-np.mean(ue2_meas)
+
+        ra  = np.concatenate([ra , d[1].data['ira'][idx_r] , d[1].data['ira'][idx_u] ])        
+        dec = np.concatenate([dec, d[1].data['idec'][idx_r], d[1].data['idec'][idx_u] ])
+        T_meas   = np.concatenate([T_meas,rT_meas,uT_meas])
+        T_model  = np.concatenate([T_model,rT_model,uT_model])
+        e1_meas  = np.concatenate([e1_meas,re1_meas,ue1_meas])
+        e2_meas  = np.concatenate([e2_meas,re2_meas,ue2_meas])
+        e1_model = np.concatenate([e1_model,re1_model,ue1_model])
+        e2_model = np.concatenate([e2_model,re2_model,ue2_model])
+        idxr     = np.concatenate([idxr,np.ones(len(idx_r)),np.zeros(len(idx_u))])
+        idxu     = np.concatenate([idxu,np.ones(len(idx_r)),np.zeros(len(idx_u))])
+
+    f=h5py.File('./star_catalog_hscy1_allfields.h5', 'w')
+    f.create_group("stars")
+    f['stars/ra']          = ra
+    f['stars/dec']         = dec
+    f['stars/measured_T']  = T_meas
+    f['stars/measured_e1'] = e1_meas
+    f['stars/measured_e2'] = e2_meas
+    f['stars/model_T']     = T_model
+    f['stars/model_e1']    = e1_model
+    f['stars/model_e2']    = e2_model
+    f['stars/calib_psf_reserved'] = idxr
+    f['stars/calib_psf_used']     = idxu
+    f.close()
 
 
+
+ 
+else:
+
+    fieldlist = [None,'GAMA09H','GAMA15H','HECTOMAP', 'VVDS', 'WIDE12H', 'XMM']
+    field     = fieldlist[fieldi] 
+
+    d = fits.open('/global/cfs/cdirs/lsst/groups/WL/users/yomori/scratch/HSC/hsc_stars/%s_stars.fits'%field)
+
+    # If 'icalib_psf_used'==True, the star was used to model the psf 
+    # If 'icalib_psf_used'==False the star is used as a test ("reserved star")
+    # according to HSC paper the 20% of the stars are reserved
+    idx_u = np.where(d[1].data['icalib_psf_used']==True)[0]
+    idx_r = np.where(d[1].data['icalib_psf_used']==False)[0]
+
+    print("Processing: %s"%field)
+    print("Total number of stars: %d"%(len(idx_u)+len(idx_r) ) )
+    print("Number of stars used : %d"%(len(idx_u)))
+    print("Number of stars reserved : %d"%(len(idx_r)))
+
+    print("Computing T,e1,e2 from ixx,iyy,ixy")
+    ixx_meas  = d[1].data['ishape_sdss_ixx'][idx_r]
+    iyy_meas  = d[1].data['ishape_sdss_iyy'][idx_r] 
+    ixy_meas  = d[1].data['ishape_sdss_ixy'][idx_r]
+    rT_meas    = ixx_meas + iyy_meas
+    re1_meas   = (ixx_meas-iyy_meas)/rT_meas
+    re2_meas   = 2*ixy_meas/rT_meas
+
+    ixx_model = d[1].data['ishape_sdss_psf_ixx'][idx_r]
+    iyy_model = d[1].data['ishape_sdss_psf_iyy'][idx_r] 
+    ixy_model = d[1].data['ishape_sdss_psf_ixy'][idx_r]
+    rT_model   = ixx_model + iyy_model
+    re1_model  = (ixx_model-iyy_model)/rT_model
+    re2_model  = 2*ixy_model/rT_model
+
+    print("Computing T,e1,e2 from ixx,iyy,ixy")
+    ixx_meas  = d[1].data['ishape_sdss_ixx'][idx_u]
+    iyy_meas  = d[1].data['ishape_sdss_iyy'][idx_u]
+    ixy_meas  = d[1].data['ishape_sdss_ixy'][idx_u]
+    uT_meas    = ixx_meas + iyy_meas
+    ue1_meas   = (ixx_meas-iyy_meas)/uT_meas
+    ue2_meas   = 2*ixy_meas/uT_meas
+
+    ixx_model = d[1].data['ishape_sdss_psf_ixx'][idx_u]
+    iyy_model = d[1].data['ishape_sdss_psf_iyy'][idx_u]
+    ixy_model = d[1].data['ishape_sdss_psf_ixy'][idx_u]
+    uT_model   = ixx_model + iyy_model
+    ue1_model  = (ixx_model-iyy_model)/uT_model
+    ue2_model  = 2*ixy_model/uT_model
+
+
+    f=h5py.File('./star_catalog_hscy1_%s.h5'%field, 'w')
+    f.create_group("stars")
+    f['stars/ra']          = np.concatenate([d[1].data['ira'][idx_r],d[1].data['ira'][idx_u]])
+    f['stars/dec']         = np.concatenate([d[1].data['idec'][idx_r],d[1].data['idec'][idx_u]])
+    f['stars/measured_T']  = np.concatenate([rT_meas,uT_meas])
+    f['stars/measured_e1'] = np.concatenate([-re1_meas,-ue1_meas])
+    f['stars/measured_e2'] = np.concatenate([re2_meas,ue2_meas])
+    f['stars/model_T']     = np.concatenate([rT_model,uT_model])
+    f['stars/model_e1']    = np.concatenate([-re1_model,-ue1_model])
+    f['stars/model_e2']    = np.concatenate([re2_model,ue2_model]) 
+    f['stars/calib_psf_reserved'] = np.concatenate([np.ones(len(idx_r)),np.zeros(len(idx_u))])
+    f['stars/calib_psf_used']     = np.concatenate([np.zeros(len(idx_u)),np.ones(len(idx_r))])
+    f.close()
 
 '''
 # COLUMNS IN THE DES STAR CATALOG
