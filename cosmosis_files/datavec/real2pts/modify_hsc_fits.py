@@ -64,8 +64,8 @@ with fits.open(filename, mode="update") as hdul:
     new_table_hdu.name = "xim"
     # Step 4: Update the HDU list and write back to the file
     hdul[3] = new_table_hdu
-    hdul[3].header['QUANT1']='G+R'
-    hdul[3].header['QUANT2']='G+R'
+    hdul[3].header['QUANT1']='G-R'
+    hdul[3].header['QUANT2']='G-R'
     hdul[3].header['KERNEL_1']='nz_source'
     hdul[3].header['KERNEL_2']='nz_source'
     hdul[3].header['WINDOWS']='SAMPLE'
